@@ -233,17 +233,42 @@ Real-time import of sessions when OTel env vars aren't set.
 
 ---
 
-## Phase 5: Multi-Agent Adapters — TODO
+## Phase 5: Multi-Agent Adapters — DONE
 
 Support Codex, OpenClaw, and other coding agents.
 
-### Plan
+### Deliverables
 
-- [ ] Abstract `AgentAdapter` base in `agentaura/adapters/base.py`
-- [ ] `adapters/codex/` — Research Codex session format, implement adapter
-- [ ] `adapters/openclaw/` — Research OpenClaw log format, implement adapter
+- [x] `agentaura/adapters/base.py` — Abstract `AgentAdapter` base class (discover, parse, normalize)
+- [x] `agentaura/adapters/claude_code/adapter.py` — Claude Code adapter
+- [x] `agentaura/adapters/codex/` — Full Codex CLI adapter:
+  - Parser reads `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+  - Handles event types: session_meta, turn_context, response_item (message, function_call, function_call_output, reasoning), event_msg (user_message, token_count)
+  - Normalizes to same Session/Turn/Generation/ToolCall hierarchy
+  - Verified: 123 real Codex sessions parsed with turns, generations, tool calls, token counts
+- [ ] `adapters/openclaw/` — Deferred (not installed on this machine, documented format at `~/.openclaw/agents/<id>/sessions/`)
 - [ ] Unified cross-agent dashboard views
 - [ ] Agent comparison metrics
+
+### Codex Session Format (Discovered)
+
+| Event Type | Payload | Maps To |
+|---|---|---|
+| `session_meta` | id, cwd, cli_version, git, model_provider, source | Session metadata |
+| `turn_context` | model, effort, sandbox_policy, cwd | Turn context |
+| `event_msg/user_message` | message text | Turn start (user prompt) |
+| `event_msg/token_count` | total_token_usage, last_token_usage | Token tracking |
+| `response_item/message` | role, content[] | Generation (assistant response) |
+| `response_item/function_call` | name, arguments, call_id | Tool call |
+| `response_item/function_call_output` | call_id, output | Tool result |
+| `response_item/reasoning` | summary, encrypted_content | Thinking flag |
+
+### Codex Data Location
+- Sessions: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- Index: `~/.codex/session_index.jsonl`
+- SQLite: `~/.codex/state_5.sqlite` (114 threads with model, tokens, git context)
+- Config: `~/.codex/config.toml` (includes `[otel]` section)
+- Has native OTel support (traces, logs, metrics)
 
 ---
 
