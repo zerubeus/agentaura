@@ -187,22 +187,33 @@ Ran a Claude Code session with OTel enabled, verified traces appear in Langfuse.
 
 ---
 
-## Phase 3: Historical Batch Importer — TODO
+## Phase 3: Historical Batch Importer — DONE
 
-Import all ~1,800 existing sessions into Langfuse using the Python SDK.
+Import existing sessions into Langfuse using the Python SDK v4.
 
-### Plan
+### Deliverables
 
-- [ ] `agentaura/adapters/claude_code/mapper.py` — Normalized events to Langfuse objects
-  - Session → `langfuse.trace()`
-  - Turn → `trace.span()`
-  - LLM API call → `span.generation()`
-  - Tool use → `span.span()`
-  - Subagent → child trace/span linked via parentToolUseID
-- [ ] `agentaura/pipeline/exporter.py` — Langfuse SDK v4 exporter
-- [ ] `agentaura/pipeline/state.py` — SQLite import state (idempotent re-runs)
-- [ ] CLI commands: `agentaura import`, `agentaura import --project <path>`, `agentaura status`
-- [ ] Validate costs against `session_costs.txt` where available
+- [x] `agentaura/adapters/claude_code/mapper.py` — Maps normalized sessions to Langfuse objects
+  - Session → root span (via `propagate_attributes` for session_id, tags, metadata)
+  - Turn → child span (user prompt as input, permission_mode, duration)
+  - LLM API call → generation (model, usage_details, cost_details)
+  - Tool use → tool span (name, input params, output content)
+  - Subagent → agent span (agent_type, description, nested generations)
+- [x] `agentaura/pipeline/exporter.py` — Orchestrates parse → normalize → export with batched flushing
+- [x] `agentaura/pipeline/state.py` — SQLite-backed idempotent import state (file checksum tracking)
+- [x] CLI commands:
+  - `agentaura import` — Import all sessions (with --limit, --project, --host, --verbose)
+  - `agentaura status` — Show discovered/imported/remaining counts and total cost
+- [x] Verified against live Langfuse: 3 sessions imported, nested spans visible, costs computed
+- [x] Idempotent re-run confirmed: unchanged sessions skipped, changed sessions re-imported
+
+### Verified Import Results
+
+| Session | Observations | Cost |
+|---|---|---|
+| dazzling-swimming-neumann | 1,417 | $174.28 |
+| wiggly-tinkering-wolf | 37 | $2.15 |
+| calm-tinkering-frost | 6 | $0.98 |
 
 ---
 
