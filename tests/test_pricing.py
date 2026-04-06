@@ -12,8 +12,8 @@ def test_known_models_have_pricing():
 
 def test_opus_pricing():
     p = get_pricing("claude-opus-4-6")
-    assert p.input_per_m == 15.0
-    assert p.output_per_m == 75.0
+    assert p.input_per_m == 5.0
+    assert p.output_per_m == 25.0
 
 
 def test_fallback_pricing_for_unknown():
@@ -30,8 +30,8 @@ def test_compute_cost_simple():
         cache_read_input_tokens=0,
     )
     cost = compute_cost(usage, "claude-opus-4-6")
-    # 1M * 15/1M + 100K * 75/1M = 15 + 7.5 = 22.5
-    assert abs(cost - 22.5) < 0.001
+    # 1M * 5/1M + 100K * 25/1M = 5 + 2.5 = 7.5
+    assert abs(cost - 7.5) < 0.001
 
 
 def test_compute_cost_with_cache():
@@ -42,7 +42,7 @@ def test_compute_cost_with_cache():
         cache_read_input_tokens=200,
     )
     cost = compute_cost(usage, "claude-opus-4-6")
-    expected = (500 * 15.0 + 50 * 75.0 + 1000 * 18.75 + 200 * 1.50) / 1_000_000
+    expected = (500 * 5.0 + 50 * 25.0 + 1000 * 6.25 + 200 * 0.50) / 1_000_000
     assert abs(cost - expected) < 0.0001
 
 

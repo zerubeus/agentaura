@@ -24,10 +24,10 @@ class ModelPricing:
 MODEL_PRICING: dict[str, ModelPricing] = {
     # Anthropic
     "claude-opus-4-6": ModelPricing(
-        input_per_m=15.0,
-        output_per_m=75.0,
-        cache_write_per_m=18.75,
-        cache_read_per_m=1.50,
+        input_per_m=5.0,
+        output_per_m=25.0,
+        cache_write_per_m=6.25,
+        cache_read_per_m=0.50,
     ),
     "claude-sonnet-4-5-20250929": ModelPricing(
         input_per_m=3.0,
