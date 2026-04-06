@@ -36,41 +36,30 @@ MODEL_PRICING: dict[str, ModelPricing] = {
         cache_read_per_m=0.30,
     ),
     "claude-haiku-4-5-20251001": ModelPricing(
-        input_per_m=0.80,
-        output_per_m=4.0,
-        cache_write_per_m=1.0,
-        cache_read_per_m=0.08,
+        input_per_m=1.0,
+        output_per_m=5.0,
+        cache_write_per_m=1.25,
+        cache_read_per_m=0.10,
     ),
     # OpenAI — Codex CLI models
     "gpt-5.4": ModelPricing(
         input_per_m=2.50,
-        output_per_m=10.0,
+        output_per_m=15.0,
         cache_write_per_m=2.50,
-        cache_read_per_m=0.625,
+        cache_read_per_m=0.25,
     ),
     "gpt-5.4-nano": ModelPricing(
-        input_per_m=0.15,
-        output_per_m=0.60,
-        cache_write_per_m=0.15,
-        cache_read_per_m=0.0375,
+        input_per_m=0.20,
+        output_per_m=1.25,
+        cache_write_per_m=0.20,
+        cache_read_per_m=0.02,
     ),
+    # gpt-5-codex: not on current OpenAI pricing page, use gpt-5.4 rates
     "gpt-5-codex": ModelPricing(
         input_per_m=2.50,
-        output_per_m=10.0,
+        output_per_m=15.0,
         cache_write_per_m=2.50,
-        cache_read_per_m=0.625,
-    ),
-    "o3": ModelPricing(
-        input_per_m=10.0,
-        output_per_m=40.0,
-        cache_write_per_m=10.0,
-        cache_read_per_m=2.50,
-    ),
-    "o4-mini": ModelPricing(
-        input_per_m=1.10,
-        output_per_m=4.40,
-        cache_write_per_m=1.10,
-        cache_read_per_m=0.275,
+        cache_read_per_m=0.25,
     ),
 }
 
