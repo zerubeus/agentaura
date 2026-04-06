@@ -233,7 +233,7 @@ Real-time import of sessions when OTel env vars aren't set.
 
 ---
 
-## Phase 5: Multi-Agent Adapters — DONE
+## Phase 5: Multi-Agent Adapters — PARTIAL
 
 Support Codex, OpenClaw, and other coding agents.
 

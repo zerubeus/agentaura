@@ -108,7 +108,21 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
             payload = ev.payload
             item_type = payload.get("type", "")
 
-            if item_type == "message" and payload.get("role") == "assistant":
+            if item_type == "message" and payload.get("role") == "user":
+                # User prompt via response_item (alternative to event_msg/user_message)
+                content_blocks = payload.get("content", [])
+                text_parts = [
+                    b.get("text", "")
+                    for b in content_blocks
+                    if b.get("type") in ("input_text", "text")
+                ]
+                prompt_text = "\n".join(text_parts).strip()
+                if prompt_text:
+                    _flush_turn()
+                    current_prompt = prompt_text
+                    current_turn_start = ev.timestamp
+
+            elif item_type == "message" and payload.get("role") == "assistant":
                 # Assistant response — create a generation
                 content_blocks = payload.get("content", [])
                 text_parts = [
