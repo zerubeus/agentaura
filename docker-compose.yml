@@ -201,10 +201,10 @@ services:
     restart: always
     command: ["--config=/etc/otelcol/config.yaml"]
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "8888:8888"   # Collector metrics
-      - "8889:8889"   # Prometheus exporter
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "8888:8888" # Collector metrics
+      - "8889:8889" # Prometheus exporter
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
     environment:
