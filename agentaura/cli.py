@@ -26,7 +26,7 @@ def status(
     from agentaura.pipeline.state import ImportState
 
     sessions = discover_sessions(claude_dir)
-    state = ImportState()
+    state = ImportState(claude_dir=claude_dir)
     stats = state.get_stats()
     state.close()
 
@@ -90,7 +90,7 @@ def import_sessions(
         console.print(f"  Public key: {public_key}")
         raise typer.Exit(1)
 
-    state = ImportState()
+    state = ImportState(claude_dir=claude_dir)
 
     console.print("\n[bold]Importing Claude Code sessions → Langfuse[/bold]")
     console.print(f"  Host: {host}")

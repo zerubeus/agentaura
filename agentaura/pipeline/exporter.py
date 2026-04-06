@@ -56,8 +56,17 @@ def import_all(
     Returns (imported_count, skipped_count, total_cost).
     """
     if project_filter:
+        # Claude encodes project paths as directory names:
+        # /Users/me/repo → -Users-me-repo
+        # Match against both the raw filter and its encoded form.
+        encoded = project_filter.replace("/", "-").lstrip("-")
+        encoded = f"-{encoded}"
         base = (claude_dir or Path.home() / ".claude") / "projects"
-        matching = [d for d in base.iterdir() if d.is_dir() and project_filter in d.name]
+        matching = [
+            d
+            for d in base.iterdir()
+            if d.is_dir() and (project_filter in d.name or encoded in d.name)
+        ]
         session_paths: list[Path] = []
         for proj_dir in matching:
             session_paths.extend(discover_project_sessions(proj_dir))

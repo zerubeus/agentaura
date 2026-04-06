@@ -16,9 +16,10 @@ from pathlib import Path
 class ImportState:
     """SQLite-backed import state tracker."""
 
-    def __init__(self, db_path: Path | None = None):
+    def __init__(self, db_path: Path | None = None, claude_dir: Path | None = None):
         if db_path is None:
-            db_path = Path.home() / ".claude" / "agentaura_import.db"
+            base = claude_dir or Path.home() / ".claude"
+            db_path = base / "agentaura_import.db"
         self._db_path = db_path
         self._conn = sqlite3.connect(str(db_path))
         self._conn.execute("PRAGMA journal_mode=WAL")

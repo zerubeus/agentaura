@@ -6,10 +6,19 @@ Uses the Langfuse Python SDK v4 low-level API to create:
             Generation → generation (LLM API call with model, usage, cost)
                 ToolCall → child span (tool invocation)
         SubagentSpawn → child span (subagent with nested generations/tools)
+
+Uses trace_context with a deterministic trace ID derived from session_id
+so re-exports (watcher, re-import) update the existing trace rather than
+creating duplicates.
+
+Original timestamps are preserved in metadata since the Langfuse SDK
+does not expose start_time on non-event spans.
 """
 
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,6 +41,24 @@ if TYPE_CHECKING:
     ObservationParent = LangfuseSpan | LangfuseGeneration | LangfuseAgent
 
 
+def _stable_trace_id(session_id: str) -> str:
+    """Derive a deterministic 32-hex-char trace ID from session_id.
+
+    This ensures re-exports of the same session update the existing
+    Langfuse trace rather than creating duplicates.
+    """
+    return hashlib.md5(session_id.encode()).hexdigest()
+
+
+def _ts_iso(dt: datetime | None) -> str | None:
+    """Format datetime as ISO string for metadata."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.isoformat()
+
+
 def _export_tool_call(parent: ObservationParent, tc: ToolCall) -> None:
     """Create a Langfuse span for a tool call under the given parent."""
     tool_span = parent.start_observation(
@@ -42,6 +69,8 @@ def _export_tool_call(parent: ObservationParent, tc: ToolCall) -> None:
         metadata={
             "tool_use_id": tc.id,
             "is_error": tc.output_is_error,
+            "original_start_time": _ts_iso(tc.start_time),
+            "original_end_time": _ts_iso(tc.end_time),
         },
     )
     tool_span.end()
@@ -70,6 +99,7 @@ def _export_generation(parent: ObservationParent, gen: Generation) -> None:
             "has_thinking": gen.has_thinking,
             "service_tier": gen.service_tier,
             "speed": gen.speed,
+            "original_start_time": _ts_iso(gen.start_time),
         },
         usage_details=usage_details if usage_details else None,
         cost_details={"total": gen.cost_usd} if gen.cost_usd > 0 else None,
@@ -91,6 +121,8 @@ def _export_turn(parent: ObservationParent, turn: Turn) -> None:
             "permission_mode": turn.permission_mode,
             "duration_ms": turn.duration_ms,
             "generation_count": len(turn.generations),
+            "original_start_time": _ts_iso(turn.start_time),
+            "original_end_time": _ts_iso(turn.end_time),
         },
     )
 
@@ -123,8 +155,14 @@ def _export_subagent(parent: ObservationParent, sa: SubagentSpawn) -> None:
 
 
 def export_session(langfuse: Langfuse, session: NormalizedSession) -> str:
-    """Export a normalized session to Langfuse. Returns the session ID."""
+    """Export a normalized session to Langfuse. Returns the session ID.
+
+    Uses a deterministic trace ID derived from session_id so that
+    re-exports update the existing trace instead of creating duplicates.
+    """
     from langfuse import propagate_attributes
+
+    trace_id = _stable_trace_id(session.session_id)
 
     with propagate_attributes(
         session_id=session.session_id,
@@ -142,6 +180,7 @@ def export_session(langfuse: Langfuse, session: NormalizedSession) -> str:
         ],
     ):
         trace = langfuse.start_observation(
+            trace_context={"trace_id": trace_id},
             name=session.slug or f"session-{session.session_id[:8]}",
             as_type="span",
             metadata={
@@ -153,6 +192,8 @@ def export_session(langfuse: Langfuse, session: NormalizedSession) -> str:
                 "total_tool_calls": session.total_tool_calls,
                 "turn_count": len(session.turns),
                 "subagent_count": len(session.subagents),
+                "original_start_time": _ts_iso(session.start_time),
+                "original_end_time": _ts_iso(session.end_time),
             },
         )
 
