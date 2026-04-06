@@ -116,6 +116,19 @@ def _ser(obj: Any) -> str | None:
 # --- Span builders ---
 
 
+def _build_attrs(
+    base: dict[str, str | int | float | bool],
+    input_val: str | None = None,
+    output_val: str | None = None,
+) -> dict[str, str | int | float | bool]:
+    """Build attributes dict, only including input/output if non-empty."""
+    if input_val:
+        base["langfuse.observation.input"] = input_val
+    if output_val:
+        base["langfuse.observation.output"] = output_val
+    return base
+
+
 def _export_tool_call(
     tracer: trace_api.Tracer,
     parent_ctx: Context,
@@ -124,17 +137,20 @@ def _export_tool_call(
     start_ns = _ns_or_now(tc.start_time)
     end_ns = _ns(tc.end_time) or start_ns + 1_000_000
 
+    attrs = _build_attrs(
+        {
+            "langfuse.observation.type": "tool",
+            "langfuse.observation.metadata.tool_use_id": tc.id,
+            "langfuse.observation.metadata.is_error": str(tc.output_is_error),
+        },
+        input_val=_ser(tc.input_params),
+        output_val=tc.output_content[:2000] if tc.output_content else None,
+    )
     span = tracer.start_span(
         name=f"tool:{tc.name}",
         context=parent_ctx,
         start_time=start_ns,
-        attributes={
-            "langfuse.observation.type": "tool",
-            "langfuse.observation.input": _ser(tc.input_params) or "",
-            "langfuse.observation.output": tc.output_content[:2000] if tc.output_content else "",
-            "langfuse.observation.metadata.tool_use_id": tc.id,
-            "langfuse.observation.metadata.is_error": str(tc.output_is_error),
-        },
+        attributes=attrs,
     )
     span.end(end_time=end_ns)
 
@@ -158,17 +174,22 @@ def _export_generation(
     if gen.cache_read_tokens:
         usage["cache_read_input_tokens"] = gen.cache_read_tokens
 
-    attrs: dict[str, str | int | float | bool] = {
+    base: dict[str, str | int | float | bool] = {
         "langfuse.observation.type": "generation",
         "langfuse.observation.model.name": gen.model,
-        "langfuse.observation.input": user_prompt[:5000],
-        "langfuse.observation.output": gen.text_content[:5000] if gen.text_content else "",
         "langfuse.observation.metadata.request_id": gen.request_id or "",
         "langfuse.observation.metadata.stop_reason": gen.stop_reason or "",
         "langfuse.observation.metadata.has_thinking": str(gen.has_thinking),
-        "langfuse.observation.metadata.service_tier": gen.service_tier or "",
-        "langfuse.observation.metadata.speed": gen.speed or "",
     }
+    if gen.service_tier:
+        base["langfuse.observation.metadata.service_tier"] = gen.service_tier
+    if gen.speed:
+        base["langfuse.observation.metadata.speed"] = gen.speed
+    attrs = _build_attrs(
+        base,
+        input_val=user_prompt[:5000] if user_prompt else None,
+        output_val=gen.text_content[:5000] if gen.text_content else None,
+    )
     if usage:
         attrs["langfuse.observation.usage_details"] = json.dumps(usage)
     if gen.cost_usd > 0:
@@ -205,17 +226,23 @@ def _export_turn(
 ) -> None:
     start_ns = _ns_or_now(turn.start_time)
 
+    turn_base: dict[str, str | int | float | bool] = {
+        "langfuse.observation.type": "span",
+        "langfuse.observation.metadata.generation_count": str(len(turn.generations)),
+    }
+    if turn.permission_mode:
+        turn_base["langfuse.observation.metadata.permission_mode"] = turn.permission_mode
+    if turn.duration_ms:
+        turn_base["langfuse.observation.metadata.duration_ms"] = str(turn.duration_ms)
+    turn_attrs = _build_attrs(
+        turn_base,
+        input_val=turn.user_prompt[:5000] if turn.user_prompt else None,
+    )
     span = tracer.start_span(
         name=f"turn-{turn.turn_number}",
         context=parent_ctx,
         start_time=start_ns,
-        attributes={
-            "langfuse.observation.type": "span",
-            "langfuse.observation.input": turn.user_prompt[:5000] if turn.user_prompt else "",
-            "langfuse.observation.metadata.permission_mode": turn.permission_mode or "",
-            "langfuse.observation.metadata.duration_ms": str(turn.duration_ms or ""),
-            "langfuse.observation.metadata.generation_count": str(len(turn.generations)),
-        },
+        attributes=turn_attrs,
     )
     turn_ctx = trace_api.set_span_in_context(span)
 
@@ -264,22 +291,28 @@ def _export_subagent(
                 end_candidates.append(te + 1_000)
     end_ns = max(end_candidates)
 
+    sa_base: dict[str, str | int | float | bool] = {
+        "langfuse.observation.type": "agent",
+        "langfuse.observation.metadata.agent_id": sa.agent_id,
+        "langfuse.observation.metadata.event_count": str(sa.event_count),
+        "langfuse.observation.metadata.total_cost_usd": str(sa.total_cost_usd),
+        "langfuse.observation.metadata.total_input_tokens": str(sa.total_input_tokens),
+        "langfuse.observation.metadata.total_output_tokens": str(sa.total_output_tokens),
+    }
+    if sa.agent_type:
+        sa_base["langfuse.observation.metadata.agent_type"] = sa.agent_type
+    if sa.status:
+        sa_base["langfuse.observation.metadata.status"] = sa.status
+    sa_attrs = _build_attrs(
+        sa_base,
+        input_val=sa.prompt or sa.description or None,
+        output_val=sa.description,
+    )
     span = tracer.start_span(
         name=f"subagent:{sa.agent_type or sa.agent_id}",
         context=parent_ctx,
         start_time=start_ns,
-        attributes={
-            "langfuse.observation.type": "agent",
-            "langfuse.observation.input": sa.prompt or sa.description or "",
-            "langfuse.observation.output": sa.description or "",
-            "langfuse.observation.metadata.agent_id": sa.agent_id,
-            "langfuse.observation.metadata.agent_type": sa.agent_type or "",
-            "langfuse.observation.metadata.status": sa.status or "",
-            "langfuse.observation.metadata.event_count": str(sa.event_count),
-            "langfuse.observation.metadata.total_cost_usd": str(sa.total_cost_usd),
-            "langfuse.observation.metadata.total_input_tokens": str(sa.total_input_tokens),
-            "langfuse.observation.metadata.total_output_tokens": str(sa.total_output_tokens),
-        },
+        attributes=sa_attrs,
     )
     sa_ctx = trace_api.set_span_in_context(span)
 
