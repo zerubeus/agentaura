@@ -15,6 +15,7 @@ from agentaura.core.normalized import (
     ToolCall,
     Turn,
 )
+from agentaura.core.pricing import compute_cost_from_counts
 
 
 def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
@@ -140,7 +141,11 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
                         output_tokens=last_total_output,
                         cache_creation_tokens=0,
                         cache_read_tokens=0,
-                        cost_usd=0.0,
+                        cost_usd=compute_cost_from_counts(
+                            model=current_model or model or "unknown",
+                            input_tokens=last_total_input,
+                            output_tokens=last_total_output,
+                        ),
                         start_time=ev.timestamp,
                         stop_reason=payload.get("status"),
                         has_thinking=pending_thinking,
@@ -197,13 +202,13 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
         git_branch=git_branch,
         model=model,
         version=version,
-        entrypoint=entrypoint,
+        entrypoint=str(entrypoint) if entrypoint else "cli",
         slug=None,
         start_time=start_time,
         end_time=end_time,
         turns=turns,
         subagents=[],
-        total_cost_usd=0.0,
+        total_cost_usd=sum(g.cost_usd for g in all_gens),
         total_input_tokens=total_input_tokens,
         total_output_tokens=total_output_tokens,
         total_cache_creation_tokens=0,

@@ -22,6 +22,7 @@ class ModelPricing:
 
 # Pricing as of early 2026. Update as needed.
 MODEL_PRICING: dict[str, ModelPricing] = {
+    # Anthropic
     "claude-opus-4-6": ModelPricing(
         input_per_m=15.0,
         output_per_m=75.0,
@@ -39,6 +40,37 @@ MODEL_PRICING: dict[str, ModelPricing] = {
         output_per_m=4.0,
         cache_write_per_m=1.0,
         cache_read_per_m=0.08,
+    ),
+    # OpenAI — Codex CLI models
+    "gpt-5.4": ModelPricing(
+        input_per_m=2.50,
+        output_per_m=10.0,
+        cache_write_per_m=2.50,
+        cache_read_per_m=0.625,
+    ),
+    "gpt-5.4-nano": ModelPricing(
+        input_per_m=0.15,
+        output_per_m=0.60,
+        cache_write_per_m=0.15,
+        cache_read_per_m=0.0375,
+    ),
+    "gpt-5-codex": ModelPricing(
+        input_per_m=2.50,
+        output_per_m=10.0,
+        cache_write_per_m=2.50,
+        cache_read_per_m=0.625,
+    ),
+    "o3": ModelPricing(
+        input_per_m=10.0,
+        output_per_m=40.0,
+        cache_write_per_m=10.0,
+        cache_read_per_m=2.50,
+    ),
+    "o4-mini": ModelPricing(
+        input_per_m=1.10,
+        output_per_m=4.40,
+        cache_write_per_m=1.10,
+        cache_read_per_m=0.275,
     ),
 }
 
@@ -60,19 +92,35 @@ def get_pricing(model: str) -> ModelPricing:
 
 
 def compute_cost(usage: TokenUsage, model: str) -> float:
-    """Compute cost in USD from token usage and model.
+    """Compute cost in USD from TokenUsage and model."""
+    return compute_cost_from_counts(
+        model=model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_write_tokens=usage.cache_creation_input_tokens,
+        cache_read_tokens=usage.cache_read_input_tokens,
+    )
+
+
+def compute_cost_from_counts(
+    model: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """Compute cost in USD from raw token counts and model.
 
     Cost = (input * input_rate + output * output_rate
-            + cache_creation * write_rate + cache_read * read_rate) / 1_000_000
+            + cache_write * write_rate + cache_read * read_rate) / 1_000_000
     """
     pricing = get_pricing(model)
-    cost = (
-        usage.input_tokens * pricing.input_per_m
-        + usage.output_tokens * pricing.output_per_m
-        + usage.cache_creation_input_tokens * pricing.cache_write_per_m
-        + usage.cache_read_input_tokens * pricing.cache_read_per_m
+    return (
+        input_tokens * pricing.input_per_m
+        + output_tokens * pricing.output_per_m
+        + cache_write_tokens * pricing.cache_write_per_m
+        + cache_read_tokens * pricing.cache_read_per_m
     ) / 1_000_000
-    return cost
 
 
 def load_session_costs(claude_dir_path: str | None = None) -> dict[str, float]:
