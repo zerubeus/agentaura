@@ -8,6 +8,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "langfuse" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "rich" },
@@ -26,6 +28,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "langfuse", specifier = ">=4.0" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "rich", specifier = ">=13.0" },

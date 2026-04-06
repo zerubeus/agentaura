@@ -50,6 +50,7 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
 
     # Pending function call to pair with output
     pending_calls: dict[str, tuple[str, dict, datetime | None]] = {}
+    pending_thinking = False
 
     def _flush_turn() -> None:
         nonlocal current_prompt, current_turn_start, current_generations
@@ -142,18 +143,19 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
                         cost_usd=0.0,
                         start_time=ev.timestamp,
                         stop_reason=payload.get("status"),
-                        has_thinking=False,
+                        has_thinking=pending_thinking,
                         text_content="\n".join(text_parts),
                         tool_calls=[],
                         service_tier=None,
                         speed=current_effort,
                     )
                 )
+                pending_thinking = False
 
             elif item_type == "reasoning":
-                # Reasoning block — mark thinking on last generation
-                if current_generations:
-                    current_generations[-1].has_thinking = True
+                # Reasoning block — mark next generation as having thinking
+                # Reasoning comes before the assistant message in Codex events
+                pending_thinking = True
 
             elif item_type == "function_call":
                 call_id = payload.get("call_id", "")

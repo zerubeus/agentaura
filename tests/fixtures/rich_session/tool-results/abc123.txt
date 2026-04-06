@@ -1,0 +1,2 @@
+This is a large tool result stored as a sidecar file.
+It contains the full output that was too large for inline JSONL.

@@ -1,6 +1,6 @@
 """Langfuse batch exporter.
 
-Orchestrates parsing → normalization → Langfuse export for sessions,
+Orchestrates parsing → normalization → OTel export for sessions,
 with import state tracking for idempotency.
 
 State is only persisted after a successful flush to avoid marking sessions
@@ -12,9 +12,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from langfuse import Langfuse
-
-from agentaura.adapters.claude_code.mapper import export_session
+from agentaura.adapters.claude_code.mapper import export_session, flush
 from agentaura.adapters.claude_code.parser import (
     ParsedSession,
     discover_project_sessions,
@@ -27,22 +25,9 @@ from agentaura.pipeline.state import ImportState, session_checksum
 logger = logging.getLogger(__name__)
 
 
-def create_langfuse_client(
-    public_key: str | None = None,
-    secret_key: str | None = None,
-    host: str | None = None,
-) -> Langfuse:
-    """Create a Langfuse client, falling back to env vars."""
-    return Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        base_url=host,
-    )
-
-
 def import_all(
-    langfuse: Langfuse,
     state: ImportState,
+    otel_endpoint: str = "http://localhost:4318",
     claude_dir: Path | None = None,
     project_filter: str | None = None,
     limit: int | None = None,
@@ -58,7 +43,6 @@ def import_all(
     if project_filter:
         # Claude encodes project paths as directory names:
         # /Users/me/repo → -Users-me-repo
-        # Match against both the raw filter and its encoded form.
         encoded = project_filter.replace("/", "-").lstrip("-")
         encoded = f"-{encoded}"
         base = (claude_dir or Path.home() / ".claude") / "projects"
@@ -103,7 +87,7 @@ def import_all(
                 skipped += 1
                 continue
 
-            export_session(langfuse, normalized)
+            export_session(normalized, endpoint=otel_endpoint)
 
             event_count = normalized.total_generations + normalized.total_tool_calls
             pending_marks.append(
@@ -123,17 +107,25 @@ def import_all(
             skipped += 1
             continue
 
-        # Flush batch and persist state
+        # Flush batch and persist state only on success
         if (i + 1) % flush_every == 0 and pending_marks:
-            langfuse.flush()
-            for sid, sp, cs, ec, cost in pending_marks:
-                state.mark_imported(sid, sp, cs, event_count=ec, cost_usd=cost)
+            if flush(otel_endpoint):
+                for sid, sp, cs, ec, cost in pending_marks:
+                    state.mark_imported(sid, sp, cs, event_count=ec, cost_usd=cost)
+            else:
+                logger.warning("Flush failed — %d sessions not marked", len(pending_marks))
+                imported -= len(pending_marks)
+                skipped += len(pending_marks)
             pending_marks.clear()
 
     # Final flush + mark
     if pending_marks:
-        langfuse.flush()
-        for sid, sp, cs, ec, cost in pending_marks:
-            state.mark_imported(sid, sp, cs, event_count=ec, cost_usd=cost)
+        if flush(otel_endpoint):
+            for sid, sp, cs, ec, cost in pending_marks:
+                state.mark_imported(sid, sp, cs, event_count=ec, cost_usd=cost)
+        else:
+            logger.warning("Flush failed — %d sessions not marked", len(pending_marks))
+            imported -= len(pending_marks)
+            skipped += len(pending_marks)
 
     return imported, skipped, total_cost

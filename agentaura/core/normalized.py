@@ -60,11 +60,33 @@ class SubagentSpawn:
     agent_type: str | None
     description: str | None
     event_count: int
+    prompt: str | None = None  # task given to the subagent
+    status: str | None = None  # completion status (e.g., "completed")
     generations: list[Generation] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     total_cost_usd: float = 0.0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+
+
+@dataclass
+class McpToolDelta:
+    """MCP tool/instruction changes during a session."""
+
+    timestamp: datetime | None
+    added_tools: list[str] = field(default_factory=list)
+    removed_tools: list[str] = field(default_factory=list)
+    added_instructions: list[str] = field(default_factory=list)
+    removed_instructions: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FileChange:
+    """A file modification tracked by file-history-snapshot."""
+
+    message_id: str | None
+    tracked_files: dict[str, object] = field(default_factory=dict)
+    timestamp: datetime | None = None
 
 
 @dataclass
@@ -103,6 +125,8 @@ class NormalizedSession:
     total_cache_read_tokens: int
     total_generations: int
     total_tool_calls: int
+    mcp_deltas: list[McpToolDelta] = field(default_factory=list)
+    file_changes: list[FileChange] = field(default_factory=list)
 
 
 def _extract_user_prompt(
@@ -359,6 +383,59 @@ def normalize_session(parsed: ParsedSession) -> NormalizedSession:
 
     _flush_turn()
 
+    # --- Extract MCP deltas ---
+    from agentaura.core.events import (
+        AttachmentEvent,
+        DeferredToolsDelta,
+        FileHistorySnapshotEvent,
+        McpInstructionsDelta,
+        SubagentToolResult,
+    )
+
+    mcp_deltas: list[McpToolDelta] = []
+    for ev in events:
+        if not isinstance(ev, AttachmentEvent) or ev.attachment is None:
+            continue
+        att = ev.attachment
+        if isinstance(att, DeferredToolsDelta):
+            mcp_deltas.append(
+                McpToolDelta(
+                    timestamp=ev.timestamp,
+                    added_tools=att.added_names,
+                    removed_tools=att.removed_names,
+                )
+            )
+        elif isinstance(att, McpInstructionsDelta):
+            mcp_deltas.append(
+                McpToolDelta(
+                    timestamp=ev.timestamp,
+                    added_instructions=att.added_names,
+                    removed_instructions=att.removed_names,
+                )
+            )
+
+    # --- Extract file changes ---
+    file_changes: list[FileChange] = []
+    for ev in events:
+        if not isinstance(ev, FileHistorySnapshotEvent) or ev.snapshot is None:
+            continue
+        if ev.snapshot.tracked_file_backups:
+            file_changes.append(
+                FileChange(
+                    message_id=ev.message_id,
+                    tracked_files=ev.snapshot.tracked_file_backups,
+                    timestamp=ev.snapshot.timestamp,  # type: ignore[arg-type]
+                )
+            )
+
+    # --- Build subagent prompt/status lookup from parent session events ---
+    subagent_results: dict[str, SubagentToolResult] = {}
+    for ev in events:
+        if isinstance(ev, UserEvent) and ev.tool_use_result is not None:
+            tur = ev.tool_use_result
+            if isinstance(tur, SubagentToolResult) and tur.agent_id:
+                subagent_results[tur.agent_id] = tur
+
     # --- Parse subagents ---
     subagent_spawns: list[SubagentSpawn] = []
     for sa in parsed.subagents:
@@ -373,12 +450,17 @@ def normalize_session(parsed: ParsedSession) -> NormalizedSession:
                 sa_generations.append(gen)
                 sa_tool_calls.extend(gen.tool_calls)
 
+        # Enrich with prompt/status from parent session's SubagentToolResult
+        sa_result = subagent_results.get(sa.agent_id)
+
         subagent_spawns.append(
             SubagentSpawn(
                 agent_id=sa.agent_id,
                 agent_type=sa.meta.agent_type if sa.meta else None,
                 description=sa.meta.description if sa.meta else None,
                 event_count=len(sa.events),
+                prompt=sa_result.prompt if sa_result else None,
+                status=sa_result.status if sa_result else None,
                 generations=sa_generations,
                 tool_calls=sa_tool_calls,
                 total_cost_usd=sum(g.cost_usd for g in sa_generations),
@@ -410,6 +492,8 @@ def normalize_session(parsed: ParsedSession) -> NormalizedSession:
         end_time=end_time,
         turns=turns,
         subagents=subagent_spawns,
+        mcp_deltas=mcp_deltas,
+        file_changes=file_changes,
         total_cost_usd=sum(g.cost_usd for g in all_gens) + sum(g.cost_usd for g in sa_gens),
         total_input_tokens=sum(g.input_tokens for g in all_gens)
         + sum(g.input_tokens for g in sa_gens),
