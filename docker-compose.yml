@@ -44,7 +44,7 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
       # Init — auto-create org, project, user on first start
@@ -98,7 +98,7 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
 
@@ -124,7 +124,7 @@ services:
   # ClickHouse — Traces OLAP
   # ---------------------------------------------------------------------------
   clickhouse:
-    image: docker.io/clickhouse/clickhouse-server
+    image: docker.io/clickhouse/clickhouse-server:26.3
     restart: always
     user: "101:101"
     ports:
@@ -146,7 +146,7 @@ services:
   # MinIO — S3-compatible blob storage
   # ---------------------------------------------------------------------------
   minio:
-    image: docker.io/minio/minio
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: always
     command: server /data --console-address ":9001"
     ports:
@@ -197,7 +197,7 @@ services:
   # OpenTelemetry Collector — Routes signals from Claude Code
   # ---------------------------------------------------------------------------
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:latest
+    image: docker.io/otel/opentelemetry-collector-contrib:0.149.0
     restart: always
     command: ["--config=/etc/otelcol/config.yaml"]
     ports:
@@ -208,8 +208,7 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
     environment:
-      # base64(public_key:secret_key) — update if you change init keys
-      LANGFUSE_OTEL_AUTH: "cGstbGYtYWdlbnRhdXJhOnNrLWxmLWFnZW50YXVyYQ=="
+      LANGFUSE_OTEL_AUTH: ${LANGFUSE_OTEL_AUTH}
     depends_on:
       langfuse-web:
         condition: service_started
@@ -218,7 +217,7 @@ services:
   # Prometheus — Metrics from OTel Collector
   # ---------------------------------------------------------------------------
   prometheus:
-    image: docker.io/prom/prometheus:latest
+    image: docker.io/prom/prometheus:v3.11.0
     restart: always
     ports:
       - "127.0.0.1:9092:9090"

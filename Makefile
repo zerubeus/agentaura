@@ -1,8 +1,9 @@
-.PHONY: up down logs status restart reset test lint typecheck check
+.PHONY: up down logs status restart reset test lint typecheck check env
 
 # --- Docker Compose ---
 
-up: .env ## Start the full stack
+up: ## Start the full stack (requires .env)
+	@test -f .env || (echo "Error: .env not found. Run 'make env' first and edit secrets." && exit 1)
 	docker compose up -d
 
 down: ## Stop all services
@@ -20,9 +21,11 @@ restart: ## Restart all services
 reset: ## Stop and remove all data (destructive!)
 	docker compose down -v
 
-.env: .env.example ## Create .env from example if missing
+env: ## Create .env from example (edit secrets before 'make up')
+	@test -f .env && echo ".env already exists — delete it first to regenerate" && exit 1 || true
 	cp .env.example .env
-	@echo "Created .env from .env.example — edit secrets before running 'make up'"
+	@echo "Created .env from .env.example"
+	@echo "Edit secrets in .env, then run 'make up'"
 
 # --- Development ---
 
