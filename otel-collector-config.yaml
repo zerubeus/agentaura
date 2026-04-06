@@ -1,0 +1,54 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  resource:
+    attributes:
+      - key: service.name
+        value: claude-code
+        action: upsert
+
+exporters:
+  # Traces → Langfuse OTLP ingestion endpoint
+  otlphttp/langfuse:
+    endpoint: http://langfuse-web:3000/api/public/otel
+    headers:
+      Authorization: "Basic ${LANGFUSE_OTEL_AUTH}"
+    # LANGFUSE_OTEL_AUTH = base64(public_key:secret_key)
+    # For default keys: base64("pk-lf-agentaura:sk-lf-agentaura")
+
+  # Metrics → Prometheus (via remote write or scrape)
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Debug — logs to stdout (disable in production)
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlphttp/langfuse, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
