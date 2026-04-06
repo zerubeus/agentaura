@@ -121,16 +121,69 @@ Docker Compose stack with OTel Collector routing signals properly.
 
 ---
 
-## Phase 2: Live Claude Code Trace Proof — TODO
+## Phase 2: Live Claude Code Trace Proof — DONE
 
-Run a Claude Code session with OTel enabled and verify traces appear in Langfuse.
+Ran a Claude Code session with OTel enabled, verified traces appear in Langfuse.
 
-### Plan
+### Deliverables
 
-- [ ] Source `otel-env.sh` and run a real Claude Code session
-- [ ] Verify in Langfuse: trace with nested spans, tool calls, token counts, model info, cost
-- [ ] Document gaps: what Claude's native OTel exports vs what's missing
-- [ ] Decide if native OTel is sufficient for live, or if we also need the watcher
+- [x] Verified OTel pipeline end-to-end: Python test trace → OTel Collector → Langfuse
+- [x] Ran Claude Code with `source otel-env.sh && claude`
+- [x] `LANGFUSE_INIT_ORG_ID` and `LANGFUSE_INIT_PROJECT_ID` required for headless init (fixed)
+- [x] Traces visible in Langfuse with nested spans
+
+### What Claude Code Native OTel Exports
+
+**Trace types:**
+| Span Name | Type | Attributes |
+|---|---|---|
+| `claude_code.llm_request` | Trace | model, input/output/cache tokens, duration_ms, ttft_ms, speed, attempt, success |
+| `claude_code.tool` | Trace | tool_name, full_command, duration_ms |
+| `claude_code.tool.execution` | Span (child) | duration_ms, success |
+| `claude_code.tool.blocked_on_user` | Span (child) | decision, source, duration_ms |
+
+**Common attributes on all spans:**
+- `session.id` — maps to Langfuse sessionId
+- `user.email`, `user.account_id`, `user.account_uuid`, `user.id`
+- `organization.id`
+- `terminal.type` (e.g., iTerm.app, vscode)
+- `service.name` = claude-code, `service.version` = 2.1.92
+
+**LLM request attributes:**
+- `model` = claude-opus-4-6[1m]
+- `input_tokens`, `output_tokens`, `cache_creation_tokens`, `cache_read_tokens`
+- `duration_ms`, `ttft_ms` (time to first token)
+- `speed` = normal
+- `llm_request.context` = standalone
+
+### Gap Analysis: Native OTel vs JSONL
+
+| Data Point | Native OTel | JSONL | Notes |
+|---|---|---|---|
+| Model name | `model` attribute | `assistant.message.model` | Both have it |
+| Input/output tokens | Individual attributes | `assistant.message.usage` | Both have it |
+| Cache tokens | `cache_creation_tokens`, `cache_read_tokens` | `usage.cache_creation_input_tokens` | Both |
+| Cost USD | Not exported (Langfuse computes from tokens) | Not in JSONL (we compute from pricing) | Neither has raw cost |
+| Tool name | `tool_name` attribute | `tool_use.name` in content blocks | Both |
+| Tool input params | `full_command` (Bash only) | Full `tool_use.input` dict | **JSONL is richer** |
+| Tool output/result | Not in traces | `tool_result.content` in user events | **JSONL only** |
+| User prompt text | Not in traces | `user.message.content` | **JSONL only** |
+| Assistant response text | Not in traces | `assistant.message.content` | **JSONL only** |
+| Thinking blocks | Not in traces | `thinking` content blocks (empty body) | JSONL has structure |
+| Subagent trees | Not in traces | Subagent JSONLs + meta.json | **JSONL only** |
+| TTFT (time to first token) | `ttft_ms` attribute | Not in JSONL | **OTel only** |
+| Permission decisions | `tool.blocked_on_user` span | Not in JSONL | **OTel only** |
+| Session duration | Span timestamps | `system.turn_duration` | Both |
+| Git branch | Not in traces | `gitBranch` field | **JSONL only** |
+| CWD / project | Not in traces | `cwd` field | **JSONL only** |
+| MCP usage | Not in traces | `attachment` events | **JSONL only** |
+
+### Conclusion
+
+**Both data sources are needed:**
+- **Native OTel** is best for live monitoring: real-time token counts, latency (TTFT), tool timing, permission decisions. Automatically flows into Langfuse.
+- **JSONL batch import** is needed for: prompt/response content, tool input/output details, subagent trees, project/branch context, historical data. This is Phase 3.
+- The watcher (Phase 4) remains valuable as a fallback when OTel env vars aren't set.
 
 ---
 
