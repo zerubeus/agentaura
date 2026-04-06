@@ -117,5 +117,75 @@ def import_sessions(
     console.print()
 
 
+@app.command()
+def watch(
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Langfuse host URL"),
+    ] = "http://localhost:3000",
+    public_key: Annotated[
+        str,
+        typer.Option("--public-key", envvar="LANGFUSE_PUBLIC_KEY", help="Langfuse public key"),
+    ] = "pk-lf-agentaura",
+    secret_key: Annotated[
+        str,
+        typer.Option("--secret-key", envvar="LANGFUSE_SECRET_KEY", help="Langfuse secret key"),
+    ] = "sk-lf-agentaura",
+    claude_dir: Annotated[
+        Path | None,
+        typer.Option("--claude-dir", help="Path to ~/.claude directory"),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable verbose logging"),
+    ] = False,
+) -> None:
+    """Watch for live Claude Code sessions and export to Langfuse."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    from agentaura.adapters.claude_code.mapper import export_session
+    from agentaura.adapters.claude_code.parser import parse_session
+    from agentaura.core.normalized import normalize_session
+    from agentaura.pipeline.exporter import create_langfuse_client
+    from agentaura.watcher.file_watcher import SessionWatcher
+
+    langfuse = create_langfuse_client(
+        public_key=public_key,
+        secret_key=secret_key,
+        host=host,
+    )
+
+    if not langfuse.auth_check():
+        console.print("[red]Error:[/red] Failed to authenticate with Langfuse")
+        raise typer.Exit(1)
+
+    def on_session_ready(jsonl_path: Path) -> None:
+        parsed = parse_session(jsonl_path)
+        normalized = normalize_session(parsed)
+        if not normalized.turns and not normalized.subagents:
+            return
+        export_session(langfuse, normalized)
+        langfuse.flush()
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Exported %s (%d turns, $%.4f)",
+            normalized.session_id[:12],
+            len(normalized.turns),
+            normalized.total_cost_usd,
+        )
+
+    console.print("\n[bold]AgentAura Watcher[/bold]")
+    console.print(f"  Langfuse: {host}")
+    console.print("  Watching: ~/.claude/projects/")
+    console.print("  Press Ctrl+C to stop\n")
+
+    watcher = SessionWatcher(on_session_ready, claude_dir=claude_dir)
+    watcher.run_forever()
+
+
 if __name__ == "__main__":
     app()

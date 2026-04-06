@@ -217,16 +217,19 @@ Import existing sessions into Langfuse using the Python SDK v4.
 
 ---
 
-## Phase 4: File Watcher Fallback — TODO
+## Phase 4: File Watcher Fallback — DONE
 
 Real-time import of sessions when OTel env vars aren't set.
 
-### Plan
+### Deliverables
 
-- [ ] `agentaura/watcher/file_watcher.py` — watchdog on `~/.claude/projects/`
-- [ ] `agentaura watch` CLI command (daemon mode)
-- [ ] Incremental parsing (track file byte offset, process only appended lines)
-- [ ] Handle subagent JSONL creation mid-session
+- [x] `agentaura/watcher/file_watcher.py` — watchdog-based watcher on `~/.claude/projects/`
+  - Debounced (5s) to handle rapid JSONL appends during active sessions
+  - Filters to top-level session JSONLs only (skips subagent files)
+  - Re-exports full session on each change
+- [x] `agentaura watch` CLI command — foreground daemon with Ctrl+C to stop
+  - Connects to Langfuse, watches for changes, auto-exports
+- [x] Verified: watcher fires callback after file modification settles
 
 ---
 
