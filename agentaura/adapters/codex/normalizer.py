@@ -6,6 +6,7 @@ hierarchy used by Claude Code, so they render identically in Langfuse.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from agentaura.adapters.codex.parser import ParsedCodexSession
@@ -221,8 +222,6 @@ def normalize_codex_session(parsed: ParsedCodexSession) -> NormalizedSession:
 def _parse_args(args_str: str) -> dict:
     """Parse function call arguments JSON string."""
     try:
-        import json
-
         return json.loads(args_str)
     except (json.JSONDecodeError, TypeError):
         return {"raw": args_str}

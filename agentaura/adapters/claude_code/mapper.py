@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from opentelemetry import trace as trace_api
@@ -112,6 +112,28 @@ def _ser(obj: Any) -> str | None:
     if isinstance(obj, str):
         return obj
     return json.dumps(obj, default=str)
+
+
+# --- Helpers ---
+
+
+def _collect_end_ns(
+    gens: list[Generation],
+    *,
+    buffer_ns: int = 2_000_000,
+    tc_buffer_ns: int = 1_000_000,
+) -> list[int]:
+    """Collect end-time candidates from generations and their tool calls."""
+    candidates: list[int] = []
+    for gen in gens:
+        gs = _ns(gen.start_time)
+        if gs:
+            candidates.append(gs + buffer_ns)
+        for tc in gen.tool_calls:
+            tce = _ns(tc.end_time)
+            if tce:
+                candidates.append(tce + tc_buffer_ns)
+    return candidates
 
 
 # --- Span builders ---
@@ -256,21 +278,12 @@ def _export_turn(
             # Use turn duration if available to infer actual end
             next_start = None
             if turn.duration_ms and turn.start_time:
-                from datetime import timedelta
-
                 next_start = turn.start_time + timedelta(milliseconds=turn.duration_ms)
         _export_generation(tracer, turn_ctx, gen, turn.user_prompt, next_start=next_start)
 
     # Turn must end after all children
     end_candidates = [_ns(turn.end_time) or start_ns + 1_000_000]
-    for gen in gens:
-        gs = _ns(gen.start_time)
-        if gs:
-            end_candidates.append(gs + 2_000_000)  # generation +1ms + buffer
-        for tc in gen.tool_calls:
-            te = _ns(tc.end_time)
-            if te:
-                end_candidates.append(te + 1_000_000)
+    end_candidates.extend(_collect_end_ns(gens, buffer_ns=3_000_000))
     span.end(end_time=max(end_candidates))
 
 
@@ -280,16 +293,9 @@ def _export_subagent(
     sa: SubagentSpawn,
 ) -> None:
     start_ns = _ns_or_now(sa.generations[0].start_time if sa.generations else None)
-    # End after all children: last generation start + its tool calls
+    # End after all children
     end_candidates = [start_ns + 1_000_000]
-    for gen in sa.generations:
-        gs = _ns(gen.start_time)
-        if gs:
-            end_candidates.append(gs + 1_000_000)
-        for tc in gen.tool_calls:
-            te = _ns(tc.end_time)
-            if te:
-                end_candidates.append(te + 1_000)
+    end_candidates.extend(_collect_end_ns(sa.generations, buffer_ns=1_000_000, tc_buffer_ns=1_000))
     end_ns = max(end_candidates)
 
     sa_base: dict[str, str | int | float | bool] = {
@@ -489,32 +495,19 @@ def export_session(
     if session.hook_executions:
         _export_hook_executions(tracer, root_ctx, session.hook_executions)
 
-    # Root must end after all children (turns, subagents, mcp events, file changes, hooks)
+    # Root must end after all children
     end_candidates = [_ns(session.end_time) or start_ns + 1_000_000]
     for turn in session.turns:
-        ts = _ns(turn.start_time)
-        if ts:
-            end_candidates.append(ts + 3_000_000)
-        te = _ns(turn.end_time)
-        if te:
-            end_candidates.append(te + 3_000_000)
-        for gen in turn.generations:
-            gs = _ns(gen.start_time)
-            if gs:
-                end_candidates.append(gs + 3_000_000)
-            for tc in gen.tool_calls:
-                tce = _ns(tc.end_time)
-                if tce:
-                    end_candidates.append(tce + 2_000_000)
+        for ts in [_ns(turn.start_time), _ns(turn.end_time)]:
+            if ts:
+                end_candidates.append(ts + 3_000_000)
+        end_candidates.extend(
+            _collect_end_ns(turn.generations, buffer_ns=3_000_000, tc_buffer_ns=2_000_000)
+        )
     for sa in session.subagents:
-        for gen in sa.generations:
-            gs = _ns(gen.start_time)
-            if gs:
-                end_candidates.append(gs + 3_000_000)
-            for tc in gen.tool_calls:
-                tce = _ns(tc.end_time)
-                if tce:
-                    end_candidates.append(tce + 2_000_000)
+        end_candidates.extend(
+            _collect_end_ns(sa.generations, buffer_ns=3_000_000, tc_buffer_ns=2_000_000)
+        )
     for delta in session.mcp_deltas:
         dt = _ns(delta.timestamp)
         if dt:
@@ -522,8 +515,7 @@ def export_session(
     for hook in session.hook_executions:
         ht = _ns(hook.timestamp)
         if ht:
-            dur = (hook.duration_ms or 1) * 1_000_000
-            end_candidates.append(ht + dur)
+            end_candidates.append(ht + (hook.duration_ms or 1) * 1_000_000)
     root_span.end(end_time=max(end_candidates))
 
     return session.session_id

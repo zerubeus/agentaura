@@ -144,3 +144,45 @@ def adapter_discover(codex_dir: Path) -> list[Path]:
     from agentaura.adapters.codex.parser import discover_codex_sessions
 
     return discover_codex_sessions(codex_dir)
+
+
+# --- Edge cases ---
+
+
+def test_codex_cost_computed():
+    ns = _get_codex()
+    assert ns.total_cost_usd > 0
+    for turn in ns.turns:
+        for gen in turn.generations:
+            # Generations with tokens should have cost
+            if gen.input_tokens > 0 or gen.output_tokens > 0:
+                assert gen.cost_usd > 0
+
+
+def test_codex_empty_session(tmp_path: Path):
+    """Session with only session_meta should produce empty normalized session."""
+    f = tmp_path / "empty.jsonl"
+    f.write_text(
+        '{"type":"session_meta","payload":{"id":"empty","cwd":"/tmp"},"timestamp":"2026-01-01T00:00:00Z"}\n'
+    )
+    parsed = parse_codex_session(f)
+    ns = normalize_codex_session(parsed)
+    assert len(ns.turns) == 0
+    assert ns.total_cost_usd == 0.0
+
+
+def test_codex_pending_call_without_output(tmp_path: Path):
+    """Function call without matching output should not crash."""
+    lines = [
+        '{"type":"session_meta","payload":{"id":"orphan","cwd":"/tmp"},"timestamp":"2026-01-01T00:00:00Z"}',
+        '{"type":"event_msg","payload":{"type":"user_message","message":"test"},"timestamp":"2026-01-01T00:00:01Z"}',
+        '{"type":"turn_context","payload":{"model":"gpt-5.4","effort":"high"},"timestamp":"2026-01-01T00:00:01Z"}',
+        '{"type":"response_item","payload":{"type":"function_call","name":"read_file","arguments":"{}","call_id":"orphan_call"},"timestamp":"2026-01-01T00:00:02Z"}',
+        # No function_call_output for orphan_call
+        '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}],"status":"completed"},"timestamp":"2026-01-01T00:00:03Z"}',
+    ]
+    f = tmp_path / "orphan.jsonl"
+    f.write_text("\n".join(lines) + "\n")
+    parsed = parse_codex_session(f)
+    ns = normalize_codex_session(parsed)
+    assert len(ns.turns) == 1

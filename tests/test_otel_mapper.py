@@ -198,6 +198,156 @@ def test_same_session_same_trace():
     spans2 = _export_and_collect()
     trace_ids_1 = {s.context.trace_id for s in spans1}
     trace_ids_2 = {s.context.trace_id for s in spans2}
-    # All spans share one trace ID, and it's the same across exports
     assert len(trace_ids_1) == 1
     assert trace_ids_1 == trace_ids_2
+
+
+# --- _collect_end_ns regression tests ---
+
+
+def test_collect_end_ns_empty_gens():
+    from agentaura.adapters.claude_code.mapper import _collect_end_ns
+
+    result = _collect_end_ns([])
+    assert result == []
+
+
+def test_collect_end_ns_with_tool_end_times():
+    from datetime import UTC, datetime
+
+    from agentaura.adapters.claude_code.mapper import _collect_end_ns
+    from agentaura.core.normalized import Generation, ToolCall
+
+    tc = ToolCall(
+        id="tc1",
+        name="Bash",
+        input_params={},
+        output_content="ok",
+        output_is_error=False,
+        start_time=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 0, 0, 5, tzinfo=UTC),
+    )
+    gen = Generation(
+        id="g1",
+        request_id=None,
+        model="test",
+        input_tokens=0,
+        output_tokens=0,
+        cache_creation_tokens=0,
+        cache_read_tokens=0,
+        cost_usd=0,
+        start_time=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        stop_reason="tool_use",
+        has_thinking=False,
+        text_content="",
+        tool_calls=[tc],
+        service_tier=None,
+        speed=None,
+    )
+    result = _collect_end_ns([gen], buffer_ns=2_000_000)
+    assert len(result) == 2
+    assert max(result) > min(result)
+
+
+def test_collect_end_ns_gen_without_tool_end():
+    from datetime import UTC, datetime
+
+    from agentaura.adapters.claude_code.mapper import _collect_end_ns
+    from agentaura.core.normalized import Generation, ToolCall
+
+    tc = ToolCall(
+        id="tc1",
+        name="Read",
+        input_params={},
+        output_content="",
+        output_is_error=False,
+        start_time=datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC),
+        end_time=None,  # No end time
+    )
+    gen = Generation(
+        id="g1",
+        request_id=None,
+        model="test",
+        input_tokens=0,
+        output_tokens=0,
+        cache_creation_tokens=0,
+        cache_read_tokens=0,
+        cost_usd=0,
+        start_time=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        stop_reason="tool_use",
+        has_thinking=False,
+        text_content="",
+        tool_calls=[tc],
+        service_tier=None,
+        speed=None,
+    )
+    result = _collect_end_ns([gen])
+    assert all(c > 0 for c in result)
+    assert len(result) == 1
+
+
+# --- _build_attrs tests ---
+
+
+def test_build_attrs_omits_empty_input():
+    from agentaura.adapters.claude_code.mapper import _build_attrs
+
+    attrs = _build_attrs({"langfuse.observation.type": "span"}, input_val=None)
+    assert "langfuse.observation.input" not in attrs
+
+
+def test_build_attrs_omits_empty_string_input():
+    from agentaura.adapters.claude_code.mapper import _build_attrs
+
+    attrs = _build_attrs({"langfuse.observation.type": "span"}, input_val="")
+    assert "langfuse.observation.input" not in attrs
+
+
+def test_build_attrs_includes_nonempty_input():
+    from agentaura.adapters.claude_code.mapper import _build_attrs
+
+    attrs = _build_attrs(
+        {"langfuse.observation.type": "span"},
+        input_val="hello",
+        output_val="world",
+    )
+    assert attrs["langfuse.observation.input"] == "hello"
+    assert attrs["langfuse.observation.output"] == "world"
+
+
+# --- Hook span tests ---
+
+
+def test_hook_spans_have_duration():
+    spans = _export_and_collect()
+    hook_spans = [s for s in spans if s.name.startswith("hook:")]
+    assert len(hook_spans) > 0
+    for hs in hook_spans:
+        duration_ns = hs.end_time - hs.start_time
+        assert duration_ns > 0, f"Hook span {hs.name} has zero duration"
+
+
+def test_hook_spans_have_command_metadata():
+    spans = _export_and_collect()
+    hook_spans = [s for s in spans if s.name.startswith("hook:")]
+    for hs in hook_spans:
+        cmd = _get_attr(hs, "langfuse.observation.metadata.command")
+        assert cmd is not None and cmd != ""
+
+
+# --- Timestamp value tests ---
+
+
+def test_turn_timestamps_are_original_not_now():
+    """Turns should have timestamps from the fixture, not import time."""
+    from datetime import UTC, datetime
+
+    spans = _export_and_collect()
+    turn_spans = [s for s in spans if s.name.startswith("turn-")]
+
+    # Fixture dates are 2026-03-15, import time would be 2026-04+
+    for ts in turn_spans:
+        start_dt = datetime.fromtimestamp(ts.start_time / 1e9, tz=UTC)
+        assert start_dt.year == 2026
+        assert start_dt.month == 3
+        assert start_dt.day == 15
