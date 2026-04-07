@@ -35,6 +35,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from agentaura.core.normalized import (
     FileChange,
     Generation,
+    HookExecution,
     McpToolDelta,
     NormalizedSession,
     SubagentSpawn,
@@ -385,6 +386,30 @@ def _export_file_changes(
         span.end(end_time=start_ns + 1_000)
 
 
+def _export_hook_executions(
+    tracer: trace_api.Tracer,
+    parent_ctx: Context,
+    hooks: list[HookExecution],
+) -> None:
+    for hook in hooks:
+        start_ns = _ns_or_now(hook.timestamp)
+        duration = hook.duration_ms * 1_000_000 if hook.duration_ms else 1_000
+        attrs: dict[str, str | int | float | bool] = {
+            "langfuse.observation.type": "event",
+            "langfuse.observation.metadata.hook_event": hook.hook_event,
+            "langfuse.observation.metadata.command": hook.command,
+        }
+        if hook.duration_ms is not None:
+            attrs["langfuse.observation.metadata.duration_ms"] = str(hook.duration_ms)
+        span = tracer.start_span(
+            name=f"hook:{hook.hook_event}",
+            context=parent_ctx,
+            start_time=start_ns,
+            attributes=attrs,
+        )
+        span.end(end_time=start_ns + duration)
+
+
 # --- Main export function ---
 
 
@@ -461,7 +486,10 @@ def export_session(
     if session.file_changes:
         _export_file_changes(tracer, root_ctx, session.file_changes)
 
-    # Root must end after all children (turns, subagents, mcp events, file changes)
+    if session.hook_executions:
+        _export_hook_executions(tracer, root_ctx, session.hook_executions)
+
+    # Root must end after all children (turns, subagents, mcp events, file changes, hooks)
     end_candidates = [_ns(session.end_time) or start_ns + 1_000_000]
     for turn in session.turns:
         ts = _ns(turn.start_time)
@@ -491,6 +519,11 @@ def export_session(
         dt = _ns(delta.timestamp)
         if dt:
             end_candidates.append(dt + 1_000_000)
+    for hook in session.hook_executions:
+        ht = _ns(hook.timestamp)
+        if ht:
+            dur = (hook.duration_ms or 1) * 1_000_000
+            end_candidates.append(ht + dur)
     root_span.end(end_time=max(end_candidates))
 
     return session.session_id

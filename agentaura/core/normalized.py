@@ -81,6 +81,16 @@ class McpToolDelta:
 
 
 @dataclass
+class HookExecution:
+    """A hook that fired during a session."""
+
+    hook_event: str  # e.g., "Stop", "PostToolUse"
+    command: str  # the shell command that ran
+    duration_ms: int | None = None
+    timestamp: datetime | None = None
+
+
+@dataclass
 class FileChange:
     """A file modification tracked by file-history-snapshot."""
 
@@ -127,6 +137,7 @@ class NormalizedSession:
     total_tool_calls: int
     mcp_deltas: list[McpToolDelta] = field(default_factory=list)
     file_changes: list[FileChange] = field(default_factory=list)
+    hook_executions: list[HookExecution] = field(default_factory=list)
 
 
 def _extract_user_prompt(
@@ -428,6 +439,36 @@ def normalize_session(parsed: ParsedSession) -> NormalizedSession:
                 )
             )
 
+    # --- Extract hook executions ---
+    from agentaura.core.events import ProgressEvent
+
+    hook_executions: list[HookExecution] = []
+
+    # From progress/hook_progress events
+    for ev in events:
+        if isinstance(ev, ProgressEvent) and isinstance(ev.data, dict):
+            if ev.data.get("type") == "hook_progress":
+                hook_executions.append(
+                    HookExecution(
+                        hook_event=ev.data.get("hookEvent", ""),
+                        command=ev.data.get("command", ""),
+                        timestamp=ev.timestamp,
+                    )
+                )
+
+    # From system/stop_hook_summary events (has duration)
+    for ev in events:
+        if isinstance(ev, SystemEvent) and ev.subtype == "stop_hook_summary":
+            for hi in ev.hook_infos or []:
+                hook_executions.append(
+                    HookExecution(
+                        hook_event=ev.stop_reason or "Stop",
+                        command=hi.command or "",
+                        duration_ms=hi.duration_ms,
+                        timestamp=ev.timestamp,
+                    )
+                )
+
     # --- Build subagent prompt/status lookup from parent session events ---
     subagent_results: dict[str, SubagentToolResult] = {}
     for ev in events:
@@ -494,6 +535,7 @@ def normalize_session(parsed: ParsedSession) -> NormalizedSession:
         subagents=subagent_spawns,
         mcp_deltas=mcp_deltas,
         file_changes=file_changes,
+        hook_executions=hook_executions,
         total_cost_usd=sum(g.cost_usd for g in all_gens) + sum(g.cost_usd for g in sa_gens),
         total_input_tokens=sum(g.input_tokens for g in all_gens)
         + sum(g.input_tokens for g in sa_gens),
